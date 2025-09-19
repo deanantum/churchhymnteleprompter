@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Select a Hymn</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background-color: #f3f4f6; color: #1f2937; }
+    .shell { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .row { display: grid; gap: .75rem; }
+    @media (min-width: 720px) { .row-2 { grid-template-columns: 2fr 1fr; align-items: end; } }
+    label { font-weight: 600; }
+    input[type="text"], select { width: 100%; padding: .6rem .7rem; border: 1px solid #d1d5db; border-radius: 8px; box-sizing: border-box; }
+    .btns { display: flex; flex-wrap: wrap; gap: .5rem; }
+    button { padding: .6rem .9rem; border: 1px solid #cbd5e1; border-radius: 8px; background: #f9fafb; cursor: pointer; font-weight: 600; }
+    .primary { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
+    .muted { color: #6b7280; font-size: .9rem; }
+    .note { margin-top: .5rem; color: #374151; font-size: .95rem; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="card">
+      <h1 style="margin-top:0">Hymn Library</h1>
+      <p class="muted">Search by number or title. Select the match and click <strong>Load Song</strong>.</p>
+      <div class="row row-2" style="margin-top:1rem;">
+        <div>
+          <label for="searchBox">Search</label>
+          <input id="searchBox" type="text" placeholder="e.g., 19 or We Thank Thee" autocomplete="off"/>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <div class="btns">
+            <button class="primary" id="loadBtn">Load Song</button>
+            <button id="clearBtn">Clear</button>
+          </div>
+        </div>
+      </div>
+      <div class="row row-2" style="margin-top:1rem;">
+        <div>
+          <label for="songSelect">All Hymns</label>
+          <select id="songSelect" size="12" aria-label="Hymn list"></select>
+          <div class="note">Tip: Type in the search box and press <kbd>Enter</kbd> to load the top match.</div>
+        </div>
+        <div></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const searchBox = document.getElementById('searchBox');
+    const selectEl = document.getElementById('songSelect');
+    const loadBtn = document.getElementById('loadBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    let SONGS = [];
+    async function loadHymnList() {
+        try {
+            const res = await fetch("data/hymns_English.json"); // Updated to hymns_English.json
+            if (!res.ok) throw new Error(`Could not load hymn data. Status: ${res.status}`);
+            const hymnsData = await res.json();
+            SONGS = [];
+            for (const number in hymnsData) {
+                if (Object.prototype.hasOwnProperty.call(hymnsData, number)) {
+                    const hymn = hymnsData[number];
+                    if (hymn && typeof hymn.title === 'string' && hymn.title.trim()) {
+                        SONGS.push({
+                            n: parseInt(number),
+                            title: hymn.title.trim()
+                        });
+                    } else {
+                        console.warn(`Skipping hymn ${number}: Missing or invalid title`);
+                    }
+                }
+            }
+            if (SONGS.length === 0) {
+                throw new Error("No valid hymns found in hymns_English.json");
+            }
+            SONGS.sort((a, b) => a.n - b.n);
+            renderOptions(SONGS);
+            selectEl.selectedIndex = 0; // Select first hymn by default
+        } catch (error) {
+            console.error("Error loading hymn list:", error);
+            selectEl.innerHTML = '<option disabled>Error loading hymns. Please check if hymns_English.json is accessible in the data/ folder or contact support.</option>';
+            const errorDiv = document.createElement('div');
+            errorDiv.style.color = '#b91c1c';
+            errorDiv.style.marginTop = '1rem';
+            errorDiv.textContent = `Failed to load hymns: ${error.message}. Ensure hymns_English.json is in the data/ directory.`;
+            document.querySelector('.card').appendChild(errorDiv);
+        }
+    }
+    function renderOptions(list) {
+      selectEl.innerHTML = '';
+      list.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = String(s.n);
+        opt.textContent = `${s.n} - ${s.title}`;
+        selectEl.appendChild(opt);
+      });
+    }
+    function normalize(s) { return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
+    function scoreSong(song, q) {
+      const nq = normalize(q); const nt = normalize(song.title); const ns = `${song.n} - ${nt}`;
+      let score = 0;
+      if (!nq) return 0;
+      if (/^\d+$/.test(nq) && Number(nq) === song.n) score += 100;
+      if (ns.startsWith(nq) || nt.startsWith(nq)) score += 20;
+      if (ns.includes(nq) || nt.includes(nq)) score += 10;
+      let i = 0, j = 0;
+      while (i < nq.length && j < nt.length) { if (nq[i] === nt[j]) i++; j++; }
+      if (i === nq.length) score += 5;
+      return score;
+    }
+    function selectBestMatch(query) {
+      if (!query) { selectEl.selectedIndex = 0; return; }
+      let bestIdx = 0, bestScore = -1;
+      SONGS.forEach((s, idx) => {
+        const sc = scoreSong(s, query);
+        if (sc > bestScore) { bestScore = sc; bestIdx = idx; }
+      });
+      selectEl.selectedIndex = bestIdx;
+      const opt = selectEl.options[bestIdx];
+      if (opt && typeof opt.scrollIntoView === 'function') {
+        opt.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    searchBox.addEventListener('input', (e) => { selectBestMatch(e.target.value); });
+    searchBox.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (searchBox.value.trim()) {
+                loadSelected();
+            }
+        }
+    });
+    function loadSelected() {
+      const idx = selectEl.selectedIndex >= 0 ? selectEl.selectedIndex : 0;
+      const song = SONGS[idx];
+      if (!song) return;
+      location.href = `song.html?n=${encodeURIComponent(song.n)}`;
+    }
+    loadBtn.addEventListener('click', loadSelected);
+    clearBtn.addEventListener('click', () => {
+      searchBox.value = '';
+      selectEl.selectedIndex = 0;
+      searchBox.focus();
+    });
+    document.addEventListener('DOMContentLoaded', loadHymnList);
+  </script>
+</body>
+</html>
